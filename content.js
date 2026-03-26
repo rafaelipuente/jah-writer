@@ -62,7 +62,10 @@
           captureActive();
           if (sel.rangeCount > 0) selectionRange = sel.getRangeAt(0).cloneRange();
           contextMenuTriggered = false;
-          processText(lastMode);
+          // Show the toolbar so the user can choose a mode
+          const range = sel.getRangeAt(0);
+          const rect = range.getBoundingClientRect();
+          showToolbar(rect.left + rect.width / 2, rect.top);
         }
       }
     });
@@ -182,8 +185,9 @@
 
   function onFieldBlur(e) {
     setTimeout(() => {
+      if (badgePicker) return; // Picker is open — keep badge alive until user picks or dismisses
       const active = document.activeElement;
-      if (badge && !badge.contains(active) && !badgePicker?.contains(active)) {
+      if (badge && !badge.contains(active)) {
         hideBadge();
       }
     }, 150);
