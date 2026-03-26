@@ -2,6 +2,7 @@
 
 const JAH_MODES = [
   { id: "proofread",    label: "Proofread" },
+  { id: "spellcheck",   label: "Spell Check" },
   { id: "professional", label: "Make Professional" },
   { id: "casual",       label: "Casual" },
   { id: "social",       label: "Social Media" },

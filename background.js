@@ -133,7 +133,8 @@ chrome.runtime.onMessage.addListener((req, sender, res) => {
 
 function buildPrompt(text, mode) {
   const p = {
-    proofread: `You are a meticulous proofreader. Fix all grammar, spelling, punctuation, and syntax errors. Preserve the original tone and meaning. Return ONLY the corrected text.\n\nText: "${text}"`,
+    proofread:  `You are a meticulous proofreader. Fix all grammar, spelling, punctuation, and syntax errors. Preserve the original tone and meaning. Return ONLY the corrected text.\n\nText: "${text}"`,
+    spellcheck: `You are a spell checker. Fix ONLY spelling mistakes. Do not change grammar, punctuation, word order, tone, or sentence structure — even if you think they could be improved. If a word is spelled correctly, leave it exactly as written. Return ONLY the corrected text.\n\nText: "${text}"`,
     professional: `Rewrite in a polished, professional tone for business communication. Clear, confident language. Return ONLY the rewritten text.\n\nText: "${text}"`,
     casual: `Rewrite in a relaxed, conversational tone like talking to a friend. Natural and approachable. Return ONLY the rewritten text.\n\nText: "${text}"`,
     social: `Rewrite for social media — engaging, punchy, attention-grabbing. Concise and shareable. Return ONLY the rewritten text.\n\nText: "${text}"`,
