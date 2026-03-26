@@ -9,7 +9,7 @@
   let originalText = "";
   let activeElement = null;
   let selectionRange = null;
-  let contextMenuTriggered = false;
+  let replaceTarget = null;
   let lastMode = "proofread";
   let blocked = false;
 
@@ -51,7 +51,7 @@
       if (msg.action === "transformFromContext") {
         selectedText = msg.text;
         captureActive();
-        contextMenuTriggered = true;
+        captureReplaceTargetFromText(msg.text);
         processText(msg.mode);
       }
       if (msg.action === "triggerJah") {
@@ -60,8 +60,13 @@
         if (text && text.length > 1) {
           selectedText = text;
           captureActive();
-          if (sel.rangeCount > 0) selectionRange = sel.getRangeAt(0).cloneRange();
-          contextMenuTriggered = false;
+          if (sel.rangeCount > 0) {
+            setReplaceTarget({
+              type: "range",
+              range: sel.getRangeAt(0).cloneRange(),
+              editableRoot: getEditableRoot(sel.getRangeAt(0)),
+            });
+          }
           // Show the toolbar so the user can choose a mode
           const range = sel.getRangeAt(0);
           const rect = range.getBoundingClientRect();
@@ -79,9 +84,16 @@
         if (text && text.length > 1) {
           selectedText = text;
           captureActive();
-          if (sel.rangeCount > 0) selectionRange = sel.getRangeAt(0).cloneRange();
+          if (sel.rangeCount > 0) {
+            setReplaceTarget({
+              type: "range",
+              range: sel.getRangeAt(0).cloneRange(),
+              editableRoot: getEditableRoot(sel.getRangeAt(0)),
+            });
+          }
           showToolbar(e.clientX, e.clientY);
         } else {
+          clearReplaceTarget();
           hideToolbar();
         }
       }, 10);
@@ -104,9 +116,112 @@
 
   function captureActive() {
     const el = document.activeElement;
-    if (el && (el.tagName === "TEXTAREA" || el.tagName === "INPUT" || el.isContentEditable)) {
-      activeElement = el;
+    activeElement = isEditable(el) ? el : null;
+  }
+
+  function clearReplaceTarget() {
+    selectionRange = null;
+    replaceTarget = null;
+  }
+
+  function setReplaceTarget(target) {
+    if (!target) {
+      clearReplaceTarget();
+      return;
     }
+
+    if (target.type === "range" && target.range) {
+      selectionRange = target.range.cloneRange();
+      replaceTarget = {
+        type: "range",
+        range: target.range.cloneRange(),
+        editableRoot: target.editableRoot || null,
+      };
+      return;
+    }
+
+    selectionRange = null;
+    replaceTarget = { ...target };
+  }
+
+  function getEditableRoot(range) {
+    if (!activeElement?.isContentEditable || !range) return null;
+    return activeElement.contains(range.commonAncestorContainer) ? activeElement : null;
+  }
+
+  function getEditableSelectionState(el, fallbackToWhole = false) {
+    if (!el) return { text: "", target: null };
+
+    if (el.tagName === "TEXTAREA" || el.tagName === "INPUT") {
+      const value = el.value || "";
+      const start = typeof el.selectionStart === "number" ? el.selectionStart : 0;
+      const end = typeof el.selectionEnd === "number" ? el.selectionEnd : start;
+      if (end > start) {
+        return {
+          text: value.slice(start, end),
+          target: { type: "input", el, start, end },
+        };
+      }
+      if (fallbackToWhole && value) {
+        return {
+          text: value,
+          target: { type: "input", el, start: 0, end: value.length },
+        };
+      }
+      return { text: "", target: null };
+    }
+
+    if (el.isContentEditable) {
+      const sel = window.getSelection();
+      if (sel?.rangeCount > 0) {
+        const range = sel.getRangeAt(0);
+        const text = sel.toString();
+        if (text.trim() && el.contains(range.commonAncestorContainer)) {
+          return {
+            text,
+            target: { type: "range", range: range.cloneRange(), editableRoot: el },
+          };
+        }
+      }
+      if (fallbackToWhole) {
+        const text = el.textContent || "";
+        if (text.trim()) {
+          return {
+            text,
+            target: { type: "contentEditable", el },
+          };
+        }
+      }
+    }
+
+    return { text: "", target: null };
+  }
+
+  function captureReplaceTargetFromText(text) {
+    const expected = String(text || "").trim();
+    if (!expected) {
+      clearReplaceTarget();
+      return;
+    }
+
+    const sel = window.getSelection();
+    const selText = sel?.toString().trim();
+    if (selText === expected && sel?.rangeCount > 0) {
+      setReplaceTarget({
+        type: "range",
+        range: sel.getRangeAt(0).cloneRange(),
+        editableRoot: getEditableRoot(sel.getRangeAt(0)),
+      });
+      return;
+    }
+
+    const state = getEditableSelectionState(activeElement, false);
+    if (state.target && state.text.trim() === expected) {
+      setReplaceTarget(state.target);
+      return;
+    }
+
+    clearReplaceTarget();
   }
 
   function saveLastMode(mode) {
@@ -136,7 +251,6 @@
       btn.addEventListener("click", (e) => {
         e.preventDefault();
         e.stopPropagation();
-        contextMenuTriggered = false;
         saveLastMode(m.id);
         processText(m.id);
       });
@@ -271,17 +385,11 @@
         hideBadgePicker();
         const el = badgeTarget;
         if (el) {
-          const sel = window.getSelection();
-          const selText = sel?.toString().trim();
-          if (selText && selText.length > 1) {
-            selectedText = selText;
-            if (sel.rangeCount > 0) selectionRange = sel.getRangeAt(0).cloneRange();
-          } else {
-            selectedText = el.value !== undefined ? el.value : el.textContent;
-            selectionRange = null;
-          }
+          const state = getEditableSelectionState(el, true);
+          if (!state.text.trim()) return;
+          selectedText = state.text;
+          setReplaceTarget(state.target);
           activeElement = el;
-          contextMenuTriggered = false;
           saveLastMode(m.id);
           processText(m.id);
         }
@@ -299,9 +407,8 @@
       hideBadgePicker();
       const el = badgeTarget;
       if (el) {
-        const sel = window.getSelection();
-        const selText = sel?.toString().trim();
-        const query = (selText && selText.length > 1) ? selText : (el.value !== undefined ? el.value : el.textContent);
+        const state = getEditableSelectionState(el, true);
+        const query = state.text;
         if (query && query.trim()) {
           window.open("https://www.google.com/search?q=" + encodeURIComponent(query.trim()), "_blank");
         }
@@ -513,7 +620,7 @@
         </div>`;
     } else {
       const m = modes.find(i => i.id === mode) || { id: "proofread", label: "Result" };
-      const canReplace = !contextMenuTriggered || activeElement || selectionRange;
+      const canReplace = !!replaceTarget;
       const diffHtml = renderDiff(originalText, content);
       resultPanel.innerHTML = `
         <div class="jah-panel-head">
@@ -547,10 +654,13 @@
     resultPanel.querySelector(".jah-act-replace")?.addEventListener("click", (e) => {
       const newText = e.currentTarget.dataset.t;
       captureUndoState();
-      replaceText(newText);
-      showUndoToast();
-      e.currentTarget.textContent = "DONE";
-      setTimeout(() => hidePanel(), 600);
+      if (replaceText(newText)) {
+        showUndoToast();
+        e.currentTarget.textContent = "DONE";
+        setTimeout(() => hidePanel(), 600);
+      } else {
+        showNotifyToast("Could not replace here");
+      }
     });
     resultPanel.querySelector(".jah-act-close")?.addEventListener("click", hidePanel);
 
@@ -574,23 +684,28 @@
 
   // ── Undo ──
   function captureUndoState() {
-    if (!activeElement) { undoData = null; return; }
-    if (activeElement.tagName === "TEXTAREA" || activeElement.tagName === "INPUT") {
+    if (!replaceTarget) { undoData = null; return; }
+    if (replaceTarget.type === "input" && replaceTarget.el) {
       undoData = {
-        el: activeElement,
+        el: replaceTarget.el,
         type: "value",
-        value: activeElement.value,
-        start: activeElement.selectionStart,
-        end: activeElement.selectionEnd,
+        value: replaceTarget.el.value,
+        start: replaceTarget.start,
+        end: replaceTarget.end,
       };
-    } else if (activeElement.isContentEditable) {
+    } else if (replaceTarget.type === "contentEditable" && replaceTarget.el) {
       undoData = {
-        el: activeElement,
+        el: replaceTarget.el,
         type: "contentEditable",
-        html: activeElement.innerHTML,
+        html: replaceTarget.el.innerHTML,
       };
-    } else if (selectionRange) {
-      undoData = { type: "range", text: originalText };
+    } else if (replaceTarget.type === "range" && replaceTarget.range) {
+      undoData = {
+        type: "range",
+        text: originalText,
+        insertedRange: null,
+        editableRoot: replaceTarget.editableRoot || null,
+      };
     } else {
       undoData = null;
     }
@@ -648,41 +763,94 @@
       d.el.value = d.value;
       d.el.setSelectionRange(d.start, d.end);
       d.el.dispatchEvent(new Event("input", { bubbles: true }));
+      setReplaceTarget({ type: "input", el: d.el, start: d.start, end: d.end });
     } else if (d.type === "contentEditable" && d.el) {
       d.el.focus();
       d.el.innerHTML = d.html;
       d.el.dispatchEvent(new Event("input", { bubbles: true }));
+      setReplaceTarget({ type: "contentEditable", el: d.el });
+    } else if (d.type === "range" && d.insertedRange) {
+      const range = d.insertedRange.cloneRange();
+      range.deleteContents();
+      const textNode = document.createTextNode(d.text);
+      range.insertNode(textNode);
+
+      const restoredRange = document.createRange();
+      restoredRange.selectNode(textNode);
+      const sel = window.getSelection();
+      if (sel) {
+        sel.removeAllRanges();
+        sel.addRange(restoredRange);
+      }
+
+      if (d.editableRoot) {
+        d.editableRoot.dispatchEvent(new Event("input", { bubbles: true }));
+      }
+
+      setReplaceTarget({
+        type: "range",
+        range: restoredRange.cloneRange(),
+        editableRoot: d.editableRoot || null,
+      });
     }
   }
 
   // ── Replace ──
   function canReplaceFn() {
-    return activeElement || selectionRange;
+    return !!replaceTarget;
   }
 
   function replaceText(t) {
     if (!canReplaceFn()) return false;
 
-    if (activeElement && (activeElement.tagName === "TEXTAREA" || activeElement.tagName === "INPUT")) {
-      const s = activeElement.selectionStart;
-      const e = activeElement.selectionEnd;
-      activeElement.focus();
-      activeElement.setSelectionRange(s, e);
+    if (replaceTarget.type === "input" && replaceTarget.el) {
+      const { el, start, end } = replaceTarget;
+      el.focus();
+      el.setSelectionRange(start, end);
       if (!document.execCommand("insertText", false, t)) {
-        activeElement.value = activeElement.value.substring(0, s) + t + activeElement.value.substring(e);
+        el.value = el.value.substring(0, start) + t + el.value.substring(end);
       }
-      activeElement.dispatchEvent(new Event("input", { bubbles: true }));
+      const nextPos = start + t.length;
+      el.setSelectionRange(nextPos, nextPos);
+      el.dispatchEvent(new Event("input", { bubbles: true }));
+      setReplaceTarget({ type: "input", el, start, end: start + t.length });
       return true;
     }
 
-    if (selectionRange) {
+    if (replaceTarget.type === "contentEditable" && replaceTarget.el) {
+      replaceTarget.el.focus();
+      replaceTarget.el.textContent = t;
+      replaceTarget.el.dispatchEvent(new Event("input", { bubbles: true }));
+      setReplaceTarget({ type: "contentEditable", el: replaceTarget.el });
+      return true;
+    }
+
+    if (replaceTarget.type === "range" && replaceTarget.range) {
+      const range = replaceTarget.range.cloneRange();
+      const textNode = document.createTextNode(t);
+      range.deleteContents();
+      range.insertNode(textNode);
+
+      const insertedRange = document.createRange();
+      insertedRange.selectNode(textNode);
       const sel = window.getSelection();
-      sel.removeAllRanges();
-      sel.addRange(selectionRange);
-      if (!document.execCommand("insertText", false, t)) {
-        selectionRange.deleteContents();
-        selectionRange.insertNode(document.createTextNode(t));
+      if (sel) {
+        sel.removeAllRanges();
+        sel.addRange(insertedRange);
       }
+
+      if (undoData?.type === "range") {
+        undoData.insertedRange = insertedRange.cloneRange();
+      }
+      if (replaceTarget.editableRoot) {
+        replaceTarget.editableRoot.dispatchEvent(new Event("input", { bubbles: true }));
+      }
+
+      setReplaceTarget({
+        type: "range",
+        range: insertedRange.cloneRange(),
+        editableRoot: replaceTarget.editableRoot || null,
+      });
       return true;
     }
 
