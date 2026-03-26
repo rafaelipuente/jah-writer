@@ -208,8 +208,13 @@
 
     badge = document.createElement("div");
     badge.className = "jah-badge";
-    const imgUrl = chrome.runtime.getURL("icons/icon48.png");
-    badge.innerHTML = `<img src="${imgUrl}" width="20" height="20" alt="JAH Writer">`;
+    // Inline SVG avoids chrome-extension:// URL blocking on strict-CSP sites (e.g. Gmail)
+    badge.innerHTML = `<svg width="16" height="16" viewBox="0 0 18 18" fill="none" xmlns="http://www.w3.org/2000/svg" aria-label="JAH Writer">
+      <path d="M5.5 2H12.5L13.5 6H4.5Z" fill="#E95420"/>
+      <path d="M4.5 6L9 16L13.5 6Z" fill="#E95420"/>
+      <line x1="9" y1="10" x2="9" y2="15.5" stroke="#1e1e1e" stroke-width="1" stroke-linecap="round"/>
+      <line x1="6.2" y1="7" x2="7.5" y2="11" stroke="rgba(255,255,255,0.2)" stroke-width="0.8" stroke-linecap="round"/>
+    </svg>`;
     badge.addEventListener("click", (e) => {
       e.preventDefault();
       e.stopPropagation();
