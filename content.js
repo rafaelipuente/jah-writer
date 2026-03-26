@@ -334,7 +334,18 @@
     try {
       const r = await chrome.runtime.sendMessage({ action: "callAI", text: selectedText, mode: safeMode });
       if (r?.success && typeof r.result === "string") {
-        showPanel("done", r.result, safeMode);
+        if (safeMode === "factcheck") {
+          showPanel("done", r.result, safeMode);
+        } else {
+          hidePanel();
+          captureUndoState();
+          if (replaceText(r.result)) {
+            showUndoToast();
+          } else {
+            navigator.clipboard.writeText(r.result).catch(() => {});
+            showNotifyToast("Copied to clipboard");
+          }
+        }
       } else {
         showPanel("err", r?.error || "Transformation failed.");
       }
@@ -617,6 +628,16 @@
     if (undoToast) { undoToast.remove(); undoToast = null; }
   }
 
+  function showNotifyToast(msg) {
+    hideUndoToast();
+    undoToast = document.createElement("div");
+    undoToast.className = "jah-toast";
+    undoToast.innerHTML = `<span>${esc(msg)}</span>`;
+    document.body.appendChild(undoToast);
+    requestAnimationFrame(() => undoToast.classList.add("jah-show"));
+    undoTimer = setTimeout(() => hideUndoToast(), 3000);
+  }
+
   function performUndo() {
     if (!undoData) return;
     const d = undoData;
@@ -640,7 +661,7 @@
   }
 
   function replaceText(t) {
-    if (!canReplaceFn()) return;
+    if (!canReplaceFn()) return false;
 
     if (activeElement && (activeElement.tagName === "TEXTAREA" || activeElement.tagName === "INPUT")) {
       const s = activeElement.selectionStart;
@@ -651,7 +672,7 @@
         activeElement.value = activeElement.value.substring(0, s) + t + activeElement.value.substring(e);
       }
       activeElement.dispatchEvent(new Event("input", { bubbles: true }));
-      return;
+      return true;
     }
 
     if (selectionRange) {
@@ -662,7 +683,10 @@
         selectionRange.deleteContents();
         selectionRange.insertNode(document.createTextNode(t));
       }
+      return true;
     }
+
+    return false;
   }
 
   function esc(s) { const d = document.createElement("div"); d.textContent = s; return d.innerHTML; }
